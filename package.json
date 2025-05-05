@@ -1,0 +1,10 @@
+{
+  "name": "com.deeokseed33.simple-di",
+  "version": "0.0.1-experimental",
+  "displayName": "Simple DI",
+  "description": "Simple dependency injection package",
+  "author": {
+    "name": "DeeOkSeed33",
+    "email": "deeokseed33@gmail.com"
+  }
+}
