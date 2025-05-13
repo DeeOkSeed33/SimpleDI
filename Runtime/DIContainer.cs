@@ -13,6 +13,13 @@ namespace DeeOkSeed33.DI
         
         private Dictionary<Type, object> _instanceByType = new();
         private Dictionary<Type, Type> _instanceTypeByType = new();
+
+        public DIContainer()
+        {
+            Type globalInjectorType = typeof(GlobalInjector);
+            FieldInfo diContainerField = globalInjectorType.GetField("_diContainer", BINDING_FLAGS);
+            diContainerField.SetValue(null, this);
+        }
         
         public void Register<TConcrete>() where TConcrete : class
         {
@@ -35,6 +42,26 @@ namespace DeeOkSeed33.DI
             return Resolve(abstractType) as TAbstract;
         }
 
+        internal void InjectAt(object target)
+        {
+            Type type = target.GetType();
+            var members = type.GetMembers(BINDING_FLAGS)
+                .Where(m => m.GetCustomAttributes().Any(a => a is InjectAttribute)).ToArray();
+
+            foreach (MemberInfo memberInfo in members)
+            {
+                switch (memberInfo)
+                {
+                    case FieldInfo fieldInfo:
+                        InjectFieldAt(target, fieldInfo);
+                        break;
+                    case MethodInfo methodInfo:
+                        InjectMethodAt(target, methodInfo);
+                        break;
+                }
+            }
+        }
+        
         private object Resolve(Type abstractType)
         {
             if (_instanceByType.TryGetValue(abstractType, out object instance))
@@ -48,6 +75,7 @@ namespace DeeOkSeed33.DI
                 concreteType.GetConstructors(BINDING_FLAGS).OrderByDescending(c => c.GetParameters().Length).First();
 
             ParameterInfo[] parameters = constructor.GetParameters();
+            
             object[] values = new object[parameters.Length];
 
             for (int i = 0; i < parameters.Length; i++)
@@ -60,6 +88,28 @@ namespace DeeOkSeed33.DI
             _instanceByType[abstractType] = instance;
 
             return instance;
+        }
+
+        private void InjectFieldAt(object target, FieldInfo fieldInfo)
+        {
+            Type fieldType = fieldInfo.FieldType;
+            object instance = Resolve(fieldType);
+            fieldInfo.SetValue(target, instance);
+        }
+
+        private void InjectMethodAt(object target, MethodInfo methodInfo)
+        {
+            ParameterInfo[] parameters = methodInfo.GetParameters();
+            
+            object[] values = new object[parameters.Length];
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                ParameterInfo parameter = parameters[i];
+                values[i] = Resolve(parameter.ParameterType);
+            }
+
+            methodInfo.Invoke(target, values);
         }
     }
 }

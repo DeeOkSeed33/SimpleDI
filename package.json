@@ -1,6 +1,6 @@
 {
   "name": "com.deeokseed33.simple-di",
-  "version": "0.1.0-beta",
+  "version": "1.0.0",
   "displayName": "Simple DI",
   "description": "Simple dependency injection package",
   "author": {
