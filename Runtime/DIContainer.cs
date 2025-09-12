@@ -11,105 +11,109 @@ namespace DeeOkSeed33.DI
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly | 
             BindingFlags.Static;
         
-        private Dictionary<Type, object> _instanceByType = new();
-        private Dictionary<Type, Type> _instanceTypeByType = new();
+        private readonly Dictionary<Type, object> _instanceByType = new();
+        private readonly List<IInitializable> _initializables = new();
 
-        public DIContainer()
+        private readonly bool _autoInitialize;
+
+        public DIContainer(bool autoInitialize = false)
         {
+            _autoInitialize = autoInitialize;
+            
             Type globalInjectorType = typeof(GlobalInjector);
             FieldInfo diContainerField = globalInjectorType.GetField("_diContainer", BINDING_FLAGS);
             diContainerField.SetValue(null, this);
         }
         
-        public void Register<TConcrete>() where TConcrete : class
-        {
-            Bind<TConcrete, TConcrete>();
-        }
+        public void Register<TInstance>() where TInstance : class => Bind<TInstance, TInstance>();
 
-        public void Bind<TAbstract, TConcrete>() where TAbstract : class where TConcrete : class
+        public void Bind<TAbstract, TInstance>() where TAbstract : class where TInstance : class
         {
             Type abstractType = typeof(TAbstract);
-            Type concreteType = typeof(TConcrete);
+            Type instanceType = typeof(TInstance);
             
-            if (!_instanceTypeByType.TryAdd(abstractType, concreteType))
+            object instance = Activator.CreateInstance(instanceType);
+            
+            if (!_instanceByType.TryAdd(abstractType, instance))
+                throw new InvalidOperationException(
+                    $"Type {abstractType.Name} is already registered in the DI container");
+        }
+        
+        public void Add(object instance)
+        {
+            Type abstractType = instance.GetType();
+            
+            if (!_instanceByType.TryAdd(abstractType, instance))
                 throw new InvalidOperationException(
                     $"Type {abstractType.Name} is already registered in the DI container");
         }
 
-        public TAbstract Resolve<TAbstract>() where TAbstract : class
+        public void AddAs<TAbstract>(object instance)
         {
             Type abstractType = typeof(TAbstract);
-            return Resolve(abstractType) as TAbstract;
+            
+            if (!_instanceByType.TryAdd(abstractType, instance))
+                throw new InvalidOperationException(
+                    $"Type {abstractType.Name} is already registered in the DI container");
         }
 
-        internal void InjectAt(object target)
+        public TAbstract Get<TAbstract>()
         {
-            Type type = target.GetType();
-            var members = type.GetMembers(BINDING_FLAGS)
-                .Where(m => m.GetCustomAttributes().Any(a => a is InjectAttribute)).ToArray();
+            Type abstractType = typeof(TAbstract);
+            
+            if (!_instanceByType.TryGetValue(abstractType, out object instance))
+                throw new InvalidOperationException(
+                    $"Type {abstractType.Name} doesn't exist in the DI container");
 
-            foreach (MemberInfo memberInfo in members)
+            return (TAbstract)instance;
+        }
+
+        public void InjectAll()
+        {
+            foreach ((_, object instance) in _instanceByType)
+                InjectAt(instance);
+        }
+
+        public void InitAll()
+        {
+            foreach (IInitializable initializable in _initializables)
+                initializable.Initialize();
+        }
+
+        private void FindInterfaces(object instance)
+        {
+            switch (instance)
             {
-                switch (memberInfo)
-                {
-                    case FieldInfo fieldInfo:
-                        InjectFieldAt(target, fieldInfo);
-                        break;
-                    case MethodInfo methodInfo:
-                        InjectMethodAt(target, methodInfo);
-                        break;
-                }
+                case IInitializable initializable:
+                    if (_autoInitialize)
+                        initializable.Initialize();
+                    else
+                        _initializables.Add(initializable);
+                    break;
             }
         }
         
-        private object Resolve(Type abstractType)
+        internal void InjectAt(object target)
         {
-            if (_instanceByType.TryGetValue(abstractType, out object instance))
-                return instance;
+            Type type = target.GetType();
+            var fields = type.GetFields(BINDING_FLAGS)
+                .Where(m => m.GetCustomAttributes().Any(a => a is InjectAttribute)).ToArray();
+
+            foreach (FieldInfo fieldInfo in fields)
+                InjectFieldAt(target, fieldInfo);
             
-            if (!_instanceTypeByType.TryGetValue(abstractType, out Type concreteType))
-                throw new InvalidOperationException(
-                    $"Type {abstractType.Name} was not registered in the DI container");
-
-            ConstructorInfo constructor =
-                concreteType.GetConstructors(BINDING_FLAGS).OrderByDescending(c => c.GetParameters().Length).First();
-
-            ParameterInfo[] parameters = constructor.GetParameters();
-            
-            object[] values = new object[parameters.Length];
-
-            for (int i = 0; i < parameters.Length; i++)
-            {
-                ParameterInfo parameter = parameters[i];
-                values[i] = Resolve(parameter.ParameterType);
-            }
-
-            instance = constructor.Invoke(values);
-            _instanceByType[abstractType] = instance;
-
-            return instance;
+            FindInterfaces(target);
         }
 
         private void InjectFieldAt(object target, FieldInfo fieldInfo)
         {
             Type fieldType = fieldInfo.FieldType;
-            object instance = Resolve(fieldType);
-            fieldInfo.SetValue(target, instance);
-        }
 
-        private void InjectMethodAt(object target, MethodInfo methodInfo)
-        {
-            ParameterInfo[] parameters = methodInfo.GetParameters();
+            if (!_instanceByType.TryGetValue(fieldType, out object instance))
+                throw new InvalidOperationException(
+                    $"Type {fieldType.Name} doesn't exist in the DI container");
             
-            object[] values = new object[parameters.Length];
-
-            for (int i = 0; i < parameters.Length; i++)
-            {
-                ParameterInfo parameter = parameters[i];
-                values[i] = Resolve(parameter.ParameterType);
-            }
-
-            methodInfo.Invoke(target, values);
+            fieldInfo.SetValue(target, instance);
         }
     }
 }
