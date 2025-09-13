@@ -1,8 +1,8 @@
 namespace DeeOkSeed33.DI
 {
-    public static class GlobalInjector
+    public sealed class GlobalInjector
     {
-        private static DIContainer _diContainer;
+        [Inject] private static DIContainer _diContainer;
 
         public static void InjectAt(object target)
         {

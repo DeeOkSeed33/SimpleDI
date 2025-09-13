@@ -8,21 +8,19 @@ namespace DeeOkSeed33.DI
     public sealed class DIContainer
     {
         private const BindingFlags BINDING_FLAGS =
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly | 
-            BindingFlags.Static;
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private const BindingFlags BINDING_FLAGS_STATIC =
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         
         private readonly Dictionary<Type, object> _instanceByType = new();
+        private readonly List<IPreInitializable> _preInitializables = new();
         private readonly List<IInitializable> _initializables = new();
+        private readonly List<IPostInitializable> _postInitializables = new();
 
-        private readonly bool _autoInitialize;
-
-        public DIContainer(bool autoInitialize = false)
+        public DIContainer()
         {
-            _autoInitialize = autoInitialize;
-            
-            Type globalInjectorType = typeof(GlobalInjector);
-            FieldInfo diContainerField = globalInjectorType.GetField("_diContainer", BINDING_FLAGS);
-            diContainerField.SetValue(null, this);
+            Add(this);
+            InjectStaticFields<GlobalInjector>();
         }
         
         public void Register<TInstance>() where TInstance : class => Bind<TInstance, TInstance>();
@@ -74,35 +72,58 @@ namespace DeeOkSeed33.DI
                 InjectAt(instance);
         }
 
+        public void InjectStaticFields<T>()
+        {
+            Type type = typeof(T);
+            
+            foreach (FieldInfo fieldInfo in GetInjectableFields(type, BINDING_FLAGS_STATIC))
+                InjectFieldAt(null, fieldInfo);
+        }
+
+        public void PreInitAll()
+        {
+            foreach (IPreInitializable preInitializable in _preInitializables)
+                preInitializable.PreInitialize();
+        }
+
         public void InitAll()
         {
             foreach (IInitializable initializable in _initializables)
                 initializable.Initialize();
         }
 
+        public void PostInitAll()
+        {
+            foreach (IPostInitializable postInitializable in _postInitializables)
+                postInitializable.PostInitialize();
+        }
+
         private void FindInterfaces(object instance)
         {
-            switch (instance)
-            {
-                case IInitializable initializable:
-                    if (_autoInitialize)
-                        initializable.Initialize();
-                    else
-                        _initializables.Add(initializable);
-                    break;
-            }
+            if (instance is IPreInitializable preInitializable)
+                _preInitializables.Add(preInitializable);
+    
+            if (instance is IInitializable initializable)
+                _initializables.Add(initializable);
+        
+            if (instance is IPostInitializable postInitializable)
+                _postInitializables.Add(postInitializable);
         }
         
         internal void InjectAt(object target)
         {
             Type type = target.GetType();
-            var fields = type.GetFields(BINDING_FLAGS)
-                .Where(m => m.GetCustomAttributes().Any(a => a is InjectAttribute)).ToArray();
 
-            foreach (FieldInfo fieldInfo in fields)
+            foreach (FieldInfo fieldInfo in GetInjectableFields(type, BINDING_FLAGS))
                 InjectFieldAt(target, fieldInfo);
             
             FindInterfaces(target);
+        }
+
+        private FieldInfo[] GetInjectableFields(Type type, BindingFlags flags)
+        {
+            return type.GetFields(flags)
+                .Where(m => m.GetCustomAttributes().Any(a => a is InjectAttribute)).ToArray();
         }
 
         private void InjectFieldAt(object target, FieldInfo fieldInfo)
