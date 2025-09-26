@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using UnityEngine;
 
 namespace DeeOkSeed33.DI
 {
     public sealed class DIContainer
     {
         private const BindingFlags BINDING_FLAGS =
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
         private const BindingFlags BINDING_FLAGS_STATIC =
             BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         
@@ -16,6 +17,8 @@ namespace DeeOkSeed33.DI
         private readonly List<IPreInitializable> _preInitializables = new();
         private readonly List<IInitializable> _initializables = new();
         private readonly List<IPostInitializable> _postInitializables = new();
+
+        private Type[] _baseStopTypes = {typeof(System.Object), typeof(UnityEngine.Object), typeof(MonoBehaviour)};
 
         public DIContainer()
         {
@@ -114,8 +117,15 @@ namespace DeeOkSeed33.DI
         {
             Type type = target.GetType();
 
-            foreach (FieldInfo fieldInfo in GetInjectableFields(type, BINDING_FLAGS))
-                InjectFieldAt(target, fieldInfo);
+            while (!_baseStopTypes.Contains(type))
+            {
+                var fields = GetInjectableFields(type, BINDING_FLAGS);
+
+                foreach (FieldInfo fieldInfo in fields)
+                    InjectFieldAt(target, fieldInfo);
+                
+                type = type.BaseType;
+            }
             
             FindInterfaces(target);
         }
