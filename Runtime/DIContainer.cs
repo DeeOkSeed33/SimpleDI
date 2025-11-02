@@ -12,8 +12,10 @@ namespace DeeOkSeed33.DI
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
         private const BindingFlags BINDING_FLAGS_STATIC =
             BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+        private readonly Dictionary<Type, object> _instanceByConcreteType = new();
+        private readonly Dictionary<Type, object> _instanceByServiceType = new();
         
-        private readonly Dictionary<Type, object> _instanceByType = new();
         private readonly List<IPreInitializable> _preInitializables = new();
         private readonly List<IInitializable> _initializables = new();
         private readonly List<IPostInitializable> _postInitializables = new();
@@ -33,27 +35,33 @@ namespace DeeOkSeed33.DI
             Type abstractType = typeof(TAbstract);
             Type instanceType = typeof(TInstance);
             
-            object instance = Activator.CreateInstance(instanceType);
-            
-            if (!_instanceByType.TryAdd(abstractType, instance))
+            if (_instanceByServiceType.ContainsKey(abstractType))
                 throw new InvalidOperationException(
                     $"Type {abstractType.Name} is already registered in the DI container");
+
+            if (!_instanceByConcreteType.TryGetValue(instanceType, out object instance))
+            {
+                instance = Activator.CreateInstance(instanceType);
+                _instanceByConcreteType.Add(instanceType, instance);
+            }
+            
+            _instanceByServiceType.Add(abstractType, instance);
         }
         
         public void Add(object instance)
         {
-            Type abstractType = instance.GetType();
+            Type instanceType = instance.GetType();
             
-            if (!_instanceByType.TryAdd(abstractType, instance))
+            if (!_instanceByServiceType.TryAdd(instanceType, instance))
                 throw new InvalidOperationException(
-                    $"Type {abstractType.Name} is already registered in the DI container");
+                    $"Type {instanceType.Name} is already registered in the DI container");
         }
 
         public void AddAs<TAbstract>(object instance)
         {
             Type abstractType = typeof(TAbstract);
             
-            if (!_instanceByType.TryAdd(abstractType, instance))
+            if (!_instanceByServiceType.TryAdd(abstractType, instance))
                 throw new InvalidOperationException(
                     $"Type {abstractType.Name} is already registered in the DI container");
         }
@@ -62,7 +70,7 @@ namespace DeeOkSeed33.DI
         {
             Type abstractType = typeof(TAbstract);
             
-            if (!_instanceByType.TryGetValue(abstractType, out object instance))
+            if (!_instanceByServiceType.TryGetValue(abstractType, out object instance))
                 throw new InvalidOperationException(
                     $"Type {abstractType.Name} doesn't exist in the DI container");
 
@@ -71,7 +79,7 @@ namespace DeeOkSeed33.DI
 
         public void InjectAll()
         {
-            foreach ((_, object instance) in _instanceByType)
+            foreach ((_, object instance) in _instanceByConcreteType)
                 InjectAt(instance);
         }
 
@@ -100,18 +108,6 @@ namespace DeeOkSeed33.DI
             foreach (IPostInitializable postInitializable in _postInitializables)
                 postInitializable.PostInitialize();
         }
-
-        private void FindInterfaces(object instance)
-        {
-            if (instance is IPreInitializable preInitializable)
-                _preInitializables.Add(preInitializable);
-    
-            if (instance is IInitializable initializable)
-                _initializables.Add(initializable);
-        
-            if (instance is IPostInitializable postInitializable)
-                _postInitializables.Add(postInitializable);
-        }
         
         internal void InjectAt(object target)
         {
@@ -129,6 +125,18 @@ namespace DeeOkSeed33.DI
             
             FindInterfaces(target);
         }
+        
+        private void FindInterfaces(object instance)
+        {
+            if (instance is IPreInitializable preInitializable)
+                _preInitializables.Add(preInitializable);
+    
+            if (instance is IInitializable initializable)
+                _initializables.Add(initializable);
+        
+            if (instance is IPostInitializable postInitializable)
+                _postInitializables.Add(postInitializable);
+        }
 
         private FieldInfo[] GetInjectableFields(Type type, BindingFlags flags)
         {
@@ -140,7 +148,7 @@ namespace DeeOkSeed33.DI
         {
             Type fieldType = fieldInfo.FieldType;
 
-            if (!_instanceByType.TryGetValue(fieldType, out object instance))
+            if (!_instanceByServiceType.TryGetValue(fieldType, out object instance))
                 throw new InvalidOperationException(
                     $"Type {fieldType.Name} doesn't exist in the DI container");
             
